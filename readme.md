@@ -41,7 +41,7 @@ This library is suitable for backend services, APIs, or CLI tools requiring Keyc
 Add to your `go.mod`:
 
 ```bash
-go get https://github.com/dgtallab/keycloak-lib@latest
+go get github.com/dgtallab/keycloak-lib@latest
 ```
 
 Run `go mod tidy`. Requires Go 1.23+.
