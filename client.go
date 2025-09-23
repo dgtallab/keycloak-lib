@@ -5,12 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"golang.org/x/oauth2"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
 func getClientToken(ctx context.Context, config *Config, lang string) (*tokenResponse, error) {
@@ -240,6 +241,33 @@ func (ka *KeycloakClient) CreateUserWithRoles(ctx context.Context, params UserCr
 	}
 
 	return userID, nil
+}
+
+func (ka *KeycloakClient) ExecuteActionsEmail(ctx context.Context, userID string, actions []string, lifespanSeconds int, redirectURI, clientID string) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+	if len(actions) == 0 {
+		return ka.errorf(ErrFailedToMarshal)
+	}
+
+	basePath := fmt.Sprintf("/admin/realms/%s/users/%s/execute-actions-email", ka.config.Realm, userID)
+	q := url.Values{}
+	if lifespanSeconds > 0 {
+		q.Set("lifespan", fmt.Sprintf("%d", lifespanSeconds))
+	}
+	if redirectURI != emptyString {
+		q.Set("redirect_uri", redirectURI)
+	}
+	if clientID != emptyString {
+		q.Set("client_id", clientID)
+	}
+	path := basePath
+	if encoded := q.Encode(); encoded != "" {
+		path = path + "?" + encoded
+	}
+
+	return ka.doRequest(ctx, http.MethodPut, path, actions, nil)
 }
 
 func (ka *KeycloakClient) GetUserByID(ctx context.Context, userID string) (*User, error) {
