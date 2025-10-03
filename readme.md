@@ -15,6 +15,7 @@ This library is suitable for backend services, APIs, or CLI tools requiring Keyc
 - [Configuration](#configuration)
 - [Usage](#usage)
   - [Initializing the Library](#initializing-the-library)
+  - [Token Verification & Middleware](#token-verification--middleware)
   - [Admin Operations](#admin-operations)
   - [Advanced Authentication](#advanced-authentication)
 - [Full Example: Web App Integration](#full-example-web-app-integration)
@@ -28,10 +29,12 @@ This library is suitable for backend services, APIs, or CLI tools requiring Keyc
 ## Features
 - **Admin API Support**: User create/get/update/delete with attributes, passwords, verification, and required actions; add client-specific roles to users; trigger password reset emails; get user ID by username; group/role/client management; session handling and logout.
 - **Token Management**: Client credentials grant, caching with lazy refresh, expiration checks, and thread-safety using RWMutex to minimize API calls.
+- **Token Verification**: OIDC-compliant JWT verification with automatic public key fetching; extract user claims, roles, groups, and custom attributes from tokens.
+- **HTTP Middleware**: Ready-to-use middleware for protecting HTTP endpoints with authentication; support for role-based access control; compatible with standard `http.Handler`, Gorilla Mux, Chi, and other popular routers.
 - **User Login**: Supports password grant for obtaining OAuth2 tokens with scopes; device code flow; authorization code exchange; magic link generation.
 - **Thread-Safety**: RWMutex-protected token operations for concurrent use.
 - **Customization**: Builder pattern for config; support for custom HTTP clients, TLS configs, and token endpoints; error messages in English or Portuguese.
-- **Minimal Dependencies**: Standard lib + `golang.org/x/oauth2`; no heavy wrappers.
+- **Minimal Dependencies**: Standard lib + `golang.org/x/oauth2` + `github.com/coreos/go-oidc/v3`; no heavy wrappers.
 - **Error Handling**: Custom errors with internationalized messages (en/pt), avoiding sensitive info leaks.
 - **Performance Optimizations**: Reused HTTP client with connection pooling and timeouts; context support for cancellations.
 - **Security Enhancements**: Enforced HTTPS (with optional override for testing); input validation to prevent injections.
@@ -96,6 +99,182 @@ if err != nil {
     log.Fatal(err)
 }
 ```
+
+### Token Verification & Middleware
+The library provides powerful token verification and middleware capabilities for protecting your HTTP endpoints.
+
+#### Creating a Token Verifier
+```go
+verifier, err := keycloaklib.NewKeycloakVerifier(ctx, config)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+#### Validating a Token Manually
+```go
+// Extract token from Authorization header
+token, err := keycloaklib.ExtractTokenFromHeader(r.Header.Get("Authorization"))
+if err != nil {
+    // Handle error
+}
+
+// Validate and extract claims
+claims, err := verifier.ValidateAccessToken(ctx, token)
+if err != nil {
+    // Handle error
+}
+
+// Access user information
+userID := claims.Sub
+email := claims.Email
+username := claims.PreferredUsername
+
+// Check roles
+if claims.HasRealmRole("admin") {
+    // User is admin
+}
+
+// Check client-specific roles
+if claims.HasClientRole("my-app", "user") {
+    // User has 'user' role in 'my-app' client
+}
+
+// Check group membership
+if claims.IsInGroup("/managers") {
+    // User is in managers group
+}
+```
+
+#### Using the HTTP Middleware
+The library provides ready-to-use middleware for protecting your HTTP endpoints:
+
+##### Basic Authentication Middleware
+```go
+// Create middleware
+authMiddleware := keycloaklib.NewAuthMiddleware(keycloaklib.AuthMiddlewareConfig{
+    Verifier: verifier,
+})
+
+// Protect an endpoint
+http.Handle("/api/protected", authMiddleware.Handler(http.HandlerFunc(protectedHandler)))
+
+func protectedHandler(w http.ResponseWriter, r *http.Request) {
+    // Get user claims from context
+    claims, ok := keycloaklib.GetTokenClaims(r)
+    if !ok {
+        http.Error(w, "Failed to get claims", http.StatusInternalServerError)
+        return
+    }
+    
+    fmt.Fprintf(w, "Hello %s!", claims.Name)
+}
+```
+
+##### Role-Based Access Control
+```go
+// Require specific realm role
+adminMiddleware := keycloaklib.NewAuthMiddleware(keycloaklib.AuthMiddlewareConfig{
+    Verifier:      verifier,
+    RequiredRoles: []string{"admin"},
+})
+
+http.Handle("/api/admin", adminMiddleware.Handler(http.HandlerFunc(adminHandler)))
+
+// Require client-specific role
+userMiddleware := keycloaklib.NewAuthMiddleware(keycloaklib.AuthMiddlewareConfig{
+    Verifier:      verifier,
+    ClientID:      "my-app",
+    RequiredRoles: []string{"user"},
+})
+
+http.Handle("/api/user", userMiddleware.Handler(http.HandlerFunc(userHandler)))
+```
+
+##### Optional Authentication
+```go
+// Allow access with or without token (but validate if present)
+http.Handle("/api/content", keycloaklib.OptionalAuthentication(verifier)(
+    http.HandlerFunc(contentHandler),
+))
+
+func contentHandler(w http.ResponseWriter, r *http.Request) {
+    claims, authenticated := keycloaklib.GetTokenClaims(r)
+    
+    if authenticated {
+        // Provide personalized content
+        fmt.Fprintf(w, "Welcome back, %s!", claims.Name)
+    } else {
+        // Provide public content
+        fmt.Fprintf(w, "Welcome, guest!")
+    }
+}
+```
+
+##### Custom Error Handler
+```go
+func customErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusUnauthorized)
+    json.NewEncoder(w).Encode(map[string]string{
+        "error": err.Error(),
+    })
+}
+
+authMiddleware := keycloaklib.NewAuthMiddleware(keycloaklib.AuthMiddlewareConfig{
+    Verifier:     verifier,
+    ErrorHandler: customErrorHandler,
+})
+```
+
+##### Using with Popular Routers
+
+**With Gorilla Mux:**
+```go
+r := mux.NewRouter()
+
+// Protected routes
+api := r.PathPrefix("/api").Subrouter()
+api.Use(keycloaklib.RequireAuthentication(verifier))
+api.HandleFunc("/profile", profileHandler)
+
+// Admin routes
+admin := r.PathPrefix("/admin").Subrouter()
+admin.Use(keycloaklib.RequireRole(verifier, "admin"))
+admin.HandleFunc("/users", usersHandler)
+```
+
+**With Chi Router:**
+```go
+r := chi.NewRouter()
+
+r.Route("/api", func(r chi.Router) {
+    r.Use(keycloaklib.RequireAuthentication(verifier))
+    r.Get("/profile", profileHandler)
+    
+    r.Group(func(r chi.Router) {
+        r.Use(keycloaklib.RequireRole(verifier, "admin"))
+        r.Get("/admin/users", adminUsersHandler)
+    })
+})
+```
+
+#### Convenience Middleware Functions
+```go
+// Simple authentication without role checks
+RequireAuthentication(verifier)
+
+// Require specific realm role
+RequireRole(verifier, "admin")
+
+// Require specific client role
+RequireClientRole(verifier, "my-app", "manager")
+
+// Optional authentication (validates if present)
+OptionalAuthentication(verifier)
+```
+
+For complete examples, see [examples_middleware.go](examples_middleware.go).
 
 ### Admin Operations
 #### Create User
