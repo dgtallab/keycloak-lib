@@ -16,6 +16,7 @@ type KeycloakClient struct {
 	language     string
 	baseURL      string
 	mu           sync.RWMutex
+	clientCache  sync.Map
 }
 
 type UserCreateParams struct {
