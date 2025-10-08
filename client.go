@@ -753,3 +753,59 @@ func (ka *KeycloakClient) ClearClientCache() {
 func (ka *KeycloakClient) ClearClientCacheByID(clientID string) {
 	ka.clientCache.Delete(clientID)
 }
+
+func (ka *KeycloakClient) GetTokenForRealm(ctx context.Context, realm, clientID, clientSecret string) (*oauth2.Token, error) {
+	if realm == emptyString {
+		return nil, ka.errorf(ErrKeycloakRealmRequired)
+	}
+
+	if clientID == emptyString {
+		clientID = ka.config.ClientID
+	}
+	if clientSecret == emptyString {
+		clientSecret = ka.config.ClientSecret
+	}
+
+	if clientID == emptyString || clientSecret == emptyString {
+		return nil, ka.errorf(ErrClientIDAndSecretRequired)
+	}
+
+	tokenURL := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/token", ka.config.URL, realm)
+
+	data := url.Values{}
+	data.Set("grant_type", "client_credentials")
+	data.Set("client_id", clientID)
+	data.Set("client_secret", clientSecret)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, ka.errorf(ErrFailedToCreateRequest, err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := ka.client.Do(req)
+	if err != nil {
+		return nil, ka.errorf(ErrFailedToExecuteRequest, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, ka.errorf(ErrFailedToReadResponse, err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, ka.errorf(ErrFailedToObtainLoginToken, resp.StatusCode, string(body))
+	}
+
+	var token oauth2.Token
+	if err := json.Unmarshal(body, &token); err != nil {
+		return nil, ka.errorf(ErrFailedToParseToken, err)
+	}
+
+	if token.AccessToken == emptyString {
+		return nil, ka.errorf(ErrNoAccessToken)
+	}
+
+	return &token, nil
+}
