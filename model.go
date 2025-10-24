@@ -31,6 +31,16 @@ type UserCreateParams struct {
 	Credentials     []Credential
 }
 
+type UserUpdateParams struct {
+	Username      string
+	Email         string
+	FirstName     string
+	LastName      string
+	Enabled       *bool
+	EmailVerified *bool
+	Attributes    map[string][]string
+}
+
 type UserCreateParamsBuilder struct {
 	params UserCreateParams
 }

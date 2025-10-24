@@ -944,6 +944,176 @@ func (ka *KeycloakClient) CheckRoleInSpecificGroup(ctx context.Context, groupID,
 	return false, nil
 }
 
+func (ka *KeycloakClient) UpdateUserData(ctx context.Context, userID string, params UserUpdateParams) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+
+	currentUser, err := ka.GetUserByID(ctx, userID)
+	if err != nil {
+		return ka.errorf(ErrFailedToGetUserWrapper, err)
+	}
+
+	if params.Username != emptyString {
+		currentUser.Username = params.Username
+	}
+	if params.Email != emptyString {
+		currentUser.Email = params.Email
+	}
+	if params.FirstName != emptyString {
+		currentUser.FirstName = params.FirstName
+	}
+	if params.LastName != emptyString {
+		currentUser.LastName = params.LastName
+	}
+	if params.Enabled != nil {
+		currentUser.Enabled = *params.Enabled
+	}
+	if params.EmailVerified != nil {
+		currentUser.EmailVerified = *params.EmailVerified
+	}
+	if params.Attributes != nil {
+		currentUser.Attributes = params.Attributes
+	}
+
+	path := fmt.Sprintf("/admin/realms/%s/users/%s", ka.config.Realm, userID)
+	return ka.doRequest(ctx, http.MethodPut, path, currentUser, nil)
+}
+
+func (ka *KeycloakClient) UpdateUserPassword(ctx context.Context, userID, newPassword string, temporary bool) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+	if newPassword == emptyString {
+		return ka.errorf(ErrPasswordRequired)
+	}
+
+	credential := Credential{
+		Type:      "password",
+		Value:     newPassword,
+		Temporary: temporary,
+	}
+
+	path := fmt.Sprintf("/admin/realms/%s/users/%s/reset-password", ka.config.Realm, userID)
+	return ka.doRequest(ctx, http.MethodPut, path, credential, nil)
+}
+
+func (ka *KeycloakClient) UpdateUserEmail(ctx context.Context, userID, newEmail string) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+	if newEmail == emptyString {
+		return ka.errorf(ErrEmailRequired)
+	}
+
+	params := UserUpdateParams{
+		Email: newEmail,
+	}
+	return ka.UpdateUserData(ctx, userID, params)
+}
+
+func (ka *KeycloakClient) UpdateUserUsername(ctx context.Context, userID, newUsername string) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+	if newUsername == emptyString {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	params := UserUpdateParams{
+		Username: newUsername,
+	}
+	return ka.UpdateUserData(ctx, userID, params)
+}
+
+func (ka *KeycloakClient) UpdateUserPasswordWithValidation(ctx context.Context, userID, currentPassword, newPassword string, temporary bool) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+	if currentPassword == emptyString {
+		return ka.errorf(ErrPasswordRequired)
+	}
+	if newPassword == emptyString {
+		return ka.errorf(ErrPasswordRequired)
+	}
+
+	user, err := ka.GetUserByID(ctx, userID)
+	if err != nil {
+		return ka.errorf(ErrFailedToGetUserWrapper, err)
+	}
+
+	if user.Username == emptyString {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	err = ka.validateCurrentPassword(ctx, user.Username, currentPassword)
+	if err != nil {
+		return ka.errorf(ErrFailedToValidateCurrentPassword, err)
+	}
+
+	return ka.UpdateUserPassword(ctx, userID, newPassword, temporary)
+}
+
+func (ka *KeycloakClient) validateCurrentPassword(ctx context.Context, username, password string) error {
+	tempClient := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	clientID := ka.config.ClientID
+	if ka.config.PublicClientID != emptyString {
+		clientID = ka.config.PublicClientID
+	}
+	if clientID == emptyString {
+		return ka.errorf(ErrClientIDRequired)
+	}
+
+	tokenURL := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/token", ka.config.URL, ka.config.Realm)
+	if ka.config.TokenEndpoint != "" {
+		tokenURL = ka.config.TokenEndpoint
+	}
+
+	data := url.Values{}
+	data.Set("grant_type", "password")
+	data.Set("client_id", clientID)
+	if ka.config.ClientSecret != emptyString && ka.config.PublicClientID == emptyString {
+		data.Set("client_secret", ka.config.ClientSecret)
+	}
+	data.Set("username", username)
+	data.Set("password", password)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return ka.errorf(ErrFailedToCreateRequest, err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := tempClient.Do(req)
+	if err != nil {
+		return ka.errorf(ErrFailedToExecuteRequest, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ka.errorf(ErrFailedToReadResponse, err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return ka.errorf(ErrCurrentPasswordIncorrect)
+	}
+
+	var token oauth2.Token
+	if err := json.Unmarshal(body, &token); err != nil {
+		return ka.errorf(ErrFailedToParseToken, err)
+	}
+
+	if token.AccessToken == emptyString {
+		return ka.errorf(ErrCurrentPasswordIncorrect)
+	}
+
+	return nil
+}
+
 func (ka *KeycloakClient) GetGroupsWithRole(ctx context.Context, roleName string) ([]Group, error) {
 	if roleName == emptyString {
 		return nil, ka.errorf(ErrUsernameRequired)
