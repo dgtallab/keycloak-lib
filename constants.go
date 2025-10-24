@@ -81,4 +81,9 @@ const (
 	ErrNoTokenInLocation                        = "ErrNoTokenInLocation"
 	ErrFailedToParseTokenParams                 = "ErrFailedToParseTokenParams"
 	ErrFailedToGenerateMagicLink                = "ErrFailedToGenerateMagicLink"
+	ErrPasswordRequired                         = "ErrPasswordRequired"
+	ErrEmailRequired                            = "ErrEmailRequired"
+	ErrFailedToGetUserWrapper                   = "ErrFailedToGetUserWrapper"
+	ErrCurrentPasswordIncorrect                 = "ErrCurrentPasswordIncorrect"
+	ErrFailedToValidateCurrentPassword          = "ErrFailedToValidateCurrentPassword"
 )

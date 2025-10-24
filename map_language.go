@@ -74,6 +74,11 @@ var translations = map[string]map[string]string{
 		ErrNoTokenInLocation:                        "no token parameters in location header",
 		ErrFailedToParseTokenParams:                 "failed to parse token parameters: %w",
 		ErrFailedToGenerateMagicLink:                "failed to generate magic link: status %d, body: %s",
+		ErrPasswordRequired:                         "password is required",
+		ErrEmailRequired:                            "email is required",
+		ErrFailedToGetUserWrapper:                   "failed to get user: %w",
+		ErrCurrentPasswordIncorrect:                 "current password is incorrect",
+		ErrFailedToValidateCurrentPassword:          "failed to validate current password: %w",
 	},
 	"pt": {
 		ErrInvalidKeycloakURL:                       "URL do Keycloak inválida",
@@ -146,5 +151,10 @@ var translations = map[string]map[string]string{
 		ErrNoTokenInLocation:                        "nenhum parâmetro de token no cabeçalho location",
 		ErrFailedToParseTokenParams:                 "falha ao analisar os parâmetros do token: %w",
 		ErrFailedToGenerateMagicLink:                "falha ao gerar magic link: status %d, corpo: %s",
+		ErrPasswordRequired:                         "senha é obrigatória",
+		ErrEmailRequired:                            "e-mail é obrigatório",
+		ErrFailedToGetUserWrapper:                   "falha ao obter o usuário: %w",
+		ErrCurrentPasswordIncorrect:                 "senha atual está incorreta",
+		ErrFailedToValidateCurrentPassword:          "falha ao validar a senha atual: %w",
 	},
 }
