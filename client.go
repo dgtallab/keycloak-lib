@@ -55,9 +55,7 @@ func getClientToken(ctx context.Context, config *Config, lang string) (*tokenRes
 }
 
 func (ka *KeycloakClient) refreshAdminToken(ctx context.Context) (*tokenResponse, error) {
-	ka.mu.RLock()
 	refreshToken := ka.refreshToken
-	ka.mu.RUnlock()
 
 	if refreshToken == emptyString {
 		return nil, ka.errorf(ErrNoRefreshToken)
@@ -105,7 +103,6 @@ func (ka *KeycloakClient) refreshAdminToken(ctx context.Context) (*tokenResponse
 }
 
 func (ka *KeycloakClient) ensureTokenValid(ctx context.Context) error {
-	// Verificação otimista com read lock
 	ka.mu.RLock()
 	if time.Now().Before(ka.expiry) {
 		ka.mu.RUnlock()
@@ -133,7 +130,6 @@ func (ka *KeycloakClient) ensureTokenValid(ctx context.Context) error {
 		return ka.errorf(ErrTokenRefreshFailed, err)
 	}
 
-	// Atualizar tokens dentro do lock
 	ka.accessToken = tok.AccessToken
 	ka.refreshToken = tok.RefreshToken
 	ka.expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second).Add(-30 * time.Second)
@@ -216,7 +212,6 @@ func (ka *KeycloakClient) doRequest(ctx context.Context, method, path string, bo
 		bodyBytes, _ := io.ReadAll(resp.Body)
 
 		if refreshErr := ka.ensureTokenValid(ctx); refreshErr != nil {
-			// Se falhou o refresh, retornar o erro original
 			return ka.errorf(ErrRequestFailed, resp.StatusCode, string(bodyBytes))
 		}
 
