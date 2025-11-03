@@ -54,13 +54,13 @@ func getClientToken(ctx context.Context, config *Config, lang string) (*tokenRes
 	return &tok, nil
 }
 
-func (ka *KeycloakClient) refreshAdminToken(ctx context.Context) error {
+func (ka *KeycloakClient) refreshAdminToken(ctx context.Context) (*tokenResponse, error) {
 	ka.mu.RLock()
 	refreshToken := ka.refreshToken
 	ka.mu.RUnlock()
 
 	if refreshToken == emptyString {
-		return ka.errorf(ErrNoRefreshToken)
+		return nil, ka.errorf(ErrNoRefreshToken)
 	}
 
 	tokenURL := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/token", ka.config.URL, ka.config.Realm)
@@ -75,39 +75,37 @@ func (ka *KeycloakClient) refreshAdminToken(ctx context.Context) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
-		return ka.errorf(ErrFailedToCreateRequest, err)
+		return nil, ka.errorf(ErrFailedToCreateRequest, err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := ka.client.Do(req)
 	if err != nil {
-		return ka.errorf(ErrFailedToExecuteRequest, err)
+		return nil, ka.errorf(ErrFailedToExecuteRequest, err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return ka.errorf(ErrFailedToReadResponse, err)
+		return nil, ka.errorf(ErrFailedToReadResponse, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return ka.errorf(ErrFailedToRefreshToken, resp.StatusCode, body)
+		return nil, ka.errorf(ErrFailedToRefreshToken, resp.StatusCode, body)
 	}
 
 	var tok tokenResponse
 	if err := json.Unmarshal(body, &tok); err != nil {
-		return ka.errorf(ErrFailedToParseToken, err)
+		return nil, ka.errorf(ErrFailedToParseToken, err)
 	}
 	if tok.AccessToken == emptyString {
-		return ka.errorf(ErrNoAccessTokenInRefresh)
+		return nil, ka.errorf(ErrNoAccessTokenInRefresh)
 	}
 
-	ka.accessToken = tok.AccessToken
-	ka.refreshToken = tok.RefreshToken
-	ka.expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second).Add(-30 * time.Second)
-	return nil
+	return &tok, nil
 }
 
 func (ka *KeycloakClient) ensureTokenValid(ctx context.Context) error {
+	// Verificação otimista com read lock
 	ka.mu.RLock()
 	if time.Now().Before(ka.expiry) {
 		ka.mu.RUnlock()
@@ -122,14 +120,20 @@ func (ka *KeycloakClient) ensureTokenValid(ctx context.Context) error {
 		return nil
 	}
 
-	if err := ka.refreshAdminToken(ctx); err == nil {
+	tok, err := ka.refreshAdminToken(ctx)
+	if err == nil && tok != nil {
+		ka.accessToken = tok.AccessToken
+		ka.refreshToken = tok.RefreshToken
+		ka.expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second).Add(-30 * time.Second)
 		return nil
 	}
 
-	tok, err := getClientToken(ctx, ka.config, ka.language)
+	tok, err = getClientToken(ctx, ka.config, ka.language)
 	if err != nil {
 		return ka.errorf(ErrTokenRefreshFailed, err)
 	}
+
+	// Atualizar tokens dentro do lock
 	ka.accessToken = tok.AccessToken
 	ka.refreshToken = tok.RefreshToken
 	ka.expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second).Add(-30 * time.Second)
@@ -147,6 +151,12 @@ func NewKeycloakClient(ctx context.Context, config *Config) (*KeycloakClient, er
 
 	if config.ClientID == emptyString || config.ClientSecret == emptyString {
 		return nil, makeError(lang, ErrClientIDAndSecretRequired)
+	}
+
+	if config.HTTPClient == nil {
+		config.HTTPClient = &http.Client{Timeout: 30 * time.Second}
+	} else if config.HTTPClient.Timeout == 0 {
+		config.HTTPClient.Timeout = 30 * time.Second
 	}
 
 	tok, err := getClientToken(ctx, config, lang)
@@ -201,6 +211,41 @@ func (ka *KeycloakClient) doRequest(ctx context.Context, method, path string, bo
 		return ka.errorf(ErrFailedToExecuteRequest, err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+
+		if refreshErr := ka.ensureTokenValid(ctx); refreshErr != nil {
+			// Se falhou o refresh, retornar o erro original
+			return ka.errorf(ErrRequestFailed, resp.StatusCode, string(bodyBytes))
+		}
+
+		if body != nil {
+			jsonBody, err := json.Marshal(body)
+			if err != nil {
+				return ka.errorf(ErrFailedToMarshal, err)
+			}
+			reqBody = bytes.NewReader(jsonBody)
+		}
+
+		req, err = http.NewRequestWithContext(ctx, method, fullURL, reqBody)
+		if err != nil {
+			return ka.errorf(ErrFailedToCreateRequest, err)
+		}
+
+		ka.mu.RLock()
+		accessToken = ka.accessToken
+		ka.mu.RUnlock()
+
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err = ka.client.Do(req)
+		if err != nil {
+			return ka.errorf(ErrFailedToExecuteRequest, err)
+		}
+		defer resp.Body.Close()
+	}
 
 	if resp.StatusCode >= 400 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
