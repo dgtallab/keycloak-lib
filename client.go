@@ -545,8 +545,25 @@ func (ka *KeycloakClient) GetGroupByID(ctx context.Context, groupID string) (*Gr
 }
 
 func (ka *KeycloakClient) AddUserToGroup(ctx context.Context, userID, groupID string) error {
-	path := fmt.Sprintf("/admin/realms/%s/groups/%s/members/%s", ka.config.Realm, groupID, userID)
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+	if groupID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+	path := fmt.Sprintf("/admin/realms/%s/users/%s/groups/%s", ka.config.Realm, userID, groupID)
 	return ka.doRequest(ctx, http.MethodPut, path, nil, nil)
+}
+
+func (ka *KeycloakClient) RemoveUserFromGroup(ctx context.Context, userID, groupID string) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+	if groupID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+	path := fmt.Sprintf("/admin/realms/%s/users/%s/groups/%s", ka.config.Realm, userID, groupID)
+	return ka.doRequest(ctx, http.MethodDelete, path, nil, nil)
 }
 
 func (ka *KeycloakClient) AddRealmRolesToGroup(ctx context.Context, groupID string, roleNames []string) error {
