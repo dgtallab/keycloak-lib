@@ -3,8 +3,7 @@
 ![Go Version](https://img.shields.io/badge/Go-1.23%2B-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen) <!-- Add actual badges if available -->
-![GoDoc](https://pkg.go.dev/badge/github.com/RamiroCyber/keycloak-lib?status.svg)
-
+![GoDoc](https://pkg.go.dev/badge/github.com/dgtallab/keycloak-lib?status.svg)
 A lightweight Go library for integrating with Keycloak. It supports Keycloak Admin REST API operations (e.g., user, group, role, and client management) using direct HTTP calls. Built with `net/http` and `encoding/json` for admin interactions, and `golang.org/x/oauth2` for token handling, it focuses on security, thread-safety, performance, and ease of use.
 
 This library is suitable for backend services, APIs, or CLI tools requiring Keycloak integration. It handles token fetching via client credentials grant, automatic refresh using `expires_in`, caching with thread-safety, and supports multiple realms/clients via configurable options.
@@ -17,6 +16,7 @@ This library is suitable for backend services, APIs, or CLI tools requiring Keyc
   - [Initializing the Library](#initializing-the-library)
   - [Token Verification & Middleware](#token-verification--middleware)
   - [Admin Operations](#admin-operations)
+  - [Group Management](#group-management)
   - [Advanced Authentication](#advanced-authentication)
 - [Full Example: Web App Integration](#full-example-web-app-integration)
 - [Best Practices](#best-practices)
@@ -27,7 +27,7 @@ This library is suitable for backend services, APIs, or CLI tools requiring Keyc
 - [Acknowledgments](#acknowledgments)
 
 ## Features
-- **Admin API Support**: User create/get/update/delete with attributes, passwords, verification, and required actions; add client-specific roles to users; trigger password reset emails; get user ID by username; group/role/client management; session handling and logout.
+- **Admin API Support**: User create/get/update/delete with attributes, passwords, verification, and required actions; add client-specific roles to users; trigger password reset emails; get user ID by username; comprehensive group management with role assignments; role/client management; session handling and logout.
 - **Token Management**: Client credentials grant, caching with lazy refresh, expiration checks, and thread-safety using RWMutex to minimize API calls.
 - **Token Verification**: OIDC-compliant JWT verification with automatic public key fetching; extract user claims, roles, groups, and custom attributes from tokens.
 - **HTTP Middleware**: Ready-to-use middleware for protecting HTTP endpoints with authentication; support for role-based access control; compatible with standard `http.Handler`, Gorilla Mux, Chi, and other popular routers.
@@ -66,7 +66,7 @@ While the library doesn't load env vars automatically, you can use them in your 
 ```go
 import (
     "os"
-    "github.com/RamiroCyber/keycloak-lib"
+    "github.com/dgtallab/keycloak-lib"
     "github.com/joho/godotenv" // Optional for .env loading
 )
 
@@ -456,6 +456,386 @@ if err != nil {
 sessions, err := admin.GetSessions(ctx, "user-id")
 if err != nil {
     // Handle error
+}
+```
+
+### Group Management
+The library provides comprehensive group management capabilities, including creating groups, assigning roles to groups, and managing user-group associations.
+
+#### Create Group (Basic)
+```go
+group := &keycloaklib.Group{Name: "Developers"}
+err := admin.CreateGroup(ctx, group)
+if err != nil {
+    // Handle error
+}
+```
+
+#### Get Group by ID
+```go
+group, err := admin.GetGroupByID(ctx, "group-id")
+if err != nil {
+    // Handle error
+}
+```
+
+#### Get Group by Name
+```go
+group, err := admin.GetGroupByName(ctx, "Developers")
+if err != nil {
+    // Handle error
+}
+fmt.Printf("Group ID: %s, Name: %s\n", group.ID, group.Name)
+```
+
+#### Get All Groups
+```go
+groups, err := admin.GetAllGroups(ctx)
+if err != nil {
+    // Handle error
+}
+for _, group := range groups {
+    fmt.Printf("Group: %s (ID: %s)\n", group.Name, group.ID)
+}
+```
+
+#### Delete Group
+```go
+err := admin.DeleteGroup(ctx, "group-id")
+if err != nil {
+    // Handle error
+}
+```
+
+#### Add User to Existing Group
+```go
+// Option 1: If you have both IDs
+err := admin.AddUserToGroup(ctx, "user-id", "group-id")
+if err != nil {
+    // Handle error
+}
+
+// Option 2: Using username and group name
+userID, err := admin.GetUserIDByUsername(ctx, "john.doe", true)
+if err != nil {
+    // Handle error
+}
+group, err := admin.GetGroupByName(ctx, "Developers")
+if err != nil {
+    // Handle error
+}
+err = admin.AddUserToGroup(ctx, userID, group.ID)
+if err != nil {
+    // Handle error
+}
+```
+
+#### Add Multiple Users to a Group
+```go
+groupID := "group-123"
+userIDs := []string{"user-001", "user-002", "user-003"}
+
+for _, userID := range userIDs {
+    err := admin.AddUserToGroup(ctx, userID, groupID)
+    if err != nil {
+        log.Printf("Failed to add user %s: %v\n", userID, err)
+        continue
+    }
+    fmt.Printf("User %s added successfully!\n", userID)
+}
+```
+
+#### Add Realm Roles to Group
+Assign realm-level roles to a group. All users in the group will inherit these roles.
+
+```go
+err := admin.AddRealmRolesToGroup(ctx, "group-id", []string{"admin", "user"})
+if err != nil {
+    // Handle error
+}
+```
+
+#### Add Client Roles to Group
+Assign client-specific roles to a group.
+
+```go
+err := admin.AddClientRolesToGroup(ctx, "group-id", "my-client-id", []string{"view-users", "manage-users"})
+if err != nil {
+    // Handle error
+}
+```
+
+#### Get Group Roles
+```go
+// Get realm roles
+realmRoles, err := admin.GetGroupRoles(ctx, "group-id")
+if err != nil {
+    // Handle error
+}
+
+// Get client-specific roles
+clientRoles, err := admin.GetGroupClientRoles(ctx, "group-id", "client-id")
+if err != nil {
+    // Handle error
+}
+```
+
+#### Create Group with Roles (Recommended)
+Creates a group and assigns roles in a single transaction with automatic rollback on failure.
+
+```go
+groupID, err := admin.CreateGroupWithRoles(
+    ctx,
+    "Administrators",                                    // Group name
+    []string{"admin", "super-user"},                    // Realm roles
+    map[string][]string{                                // Client roles
+        "api-client": {"manage-users", "view-reports"},
+        "web-client": {"full-access"},
+    },
+)
+if err != nil {
+    // Handle error - group will be rolled back if role assignment fails
+}
+fmt.Printf("Group created with ID: %s\n", groupID)
+```
+
+#### Create Complete Group (Group + Roles + Users)
+Creates a group, assigns roles, and adds users in one operation with automatic rollback.
+
+```go
+groupID, err := admin.CreateGroupWithUsersAndRoles(
+    ctx,
+    "Project Managers",                                 // Group name
+    []string{"user-id-1", "user-id-2", "user-id-3"},  // User IDs
+    []string{"project-manager"},                       // Realm roles
+    map[string][]string{                               // Client roles
+        "project-api": {"manage-projects", "view-reports"},
+        "hr-api": {"view-employees"},
+    },
+)
+if err != nil {
+    // Handle error - full rollback on any failure
+}
+fmt.Printf("Complete group created with ID: %s\n", groupID)
+```
+
+#### Get User's Groups
+```go
+groups, err := admin.GetUserGroups(ctx, "user-id")
+if err != nil {
+    // Handle error
+}
+for _, group := range groups {
+    fmt.Printf("User is in group: %s\n", group.Name)
+}
+```
+
+#### Check User Has Role in Groups
+Check if a user has a specific role through any of their groups.
+
+```go
+hasRole, err := admin.CheckUserHasRoleInGroups(ctx, "user-id", "admin")
+if err != nil {
+    // Handle error
+}
+if hasRole {
+    fmt.Println("User has admin role through group membership")
+}
+```
+
+#### Check Role Exists in Groups
+Find all groups that have a specific role assigned.
+
+```go
+exists, groups, err := admin.CheckRoleExistsInGroups(ctx, "developer")
+if err != nil {
+    // Handle error
+}
+if exists {
+    fmt.Printf("Role 'developer' found in %d groups\n", len(groups))
+    for _, group := range groups {
+        fmt.Printf("  - %s\n", group.Name)
+    }
+}
+```
+
+#### Complete Example: Group-Based Access Control
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "github.com/dgtallab/keycloak-lib"
+)
+
+func setupGroupBasedAccess() {
+    ctx := context.Background()
+    
+    // Initialize client
+    config, _ := keycloaklib.NewConfigBuilder().
+        WithURL("https://keycloak.example.com").
+        WithRealm("my-realm").
+        WithClientID("admin-client").
+        WithClientSecret("secret").
+        Build()
+    
+    client, err := keycloaklib.NewKeycloakClient(ctx, config)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 1. Create developer group with appropriate roles
+    devGroupID, err := client.CreateGroupWithRoles(
+        ctx,
+        "Developers",
+        []string{"developer"},
+        map[string][]string{
+            "api-service": {"read-api", "write-api"},
+        },
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("✅ Developer group created: %s\n", devGroupID)
+    
+    // 2. Create manager group with elevated permissions
+    mgrGroupID, err := client.CreateGroupWithRoles(
+        ctx,
+        "Managers",
+        []string{"manager", "developer"},
+        map[string][]string{
+            "api-service": {"read-api", "write-api", "admin-api"},
+            "reports": {"view-all-reports"},
+        },
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("✅ Manager group created: %s\n", mgrGroupID)
+    
+    // 3. Add users to appropriate groups
+    users := map[string]string{
+        "john.doe":  devGroupID,
+        "jane.doe":  devGroupID,
+        "bob.smith": mgrGroupID,
+    }
+    
+    for username, groupID := range users {
+        userID, err := client.GetUserIDByUsername(ctx, username, true)
+        if err != nil {
+            log.Printf("❌ User %s not found\n", username)
+            continue
+        }
+        
+        err = client.AddUserToGroup(ctx, userID, groupID)
+        if err != nil {
+            log.Printf("❌ Failed to add %s to group\n", username)
+            continue
+        }
+        fmt.Printf("✅ User %s added to group\n", username)
+    }
+    
+    // 4. Verify group permissions
+    groups, err := client.GetAllGroups(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    for _, group := range groups {
+        realmRoles, _ := client.GetGroupRoles(ctx, group.ID)
+        fmt.Printf("\n📁 Group: %s\n", group.Name)
+        fmt.Printf("   Realm Roles: ")
+        for _, role := range realmRoles {
+            fmt.Printf("%s ", role.Name)
+        }
+        fmt.Println()
+    }
+}
+```
+
+#### Best Practices for Group Management
+
+1. **Use Group-Based Roles**: Instead of assigning roles directly to users, assign them to groups for easier management.
+
+2. **Hierarchical Naming**: Use clear naming conventions like "Dev-Backend", "Dev-Frontend", "Admin-SuperUser".
+
+3. **Atomic Operations**: Use `CreateGroupWithRoles` or `CreateGroupWithUsersAndRoles` for atomic operations with automatic rollback.
+
+4. **Regular Audits**: Periodically check group memberships and roles using `GetGroupRoles` and `GetUserGroups`.
+
+5. **Minimize Direct User Roles**: Rely on group inheritance to reduce management complexity.
+
+6. **Document Group Purposes**: Keep track of what each group represents and which permissions it grants.
+
+Example of a complete workflow:
+```go
+// Define your organizational structure
+type OrgStructure struct {
+    Groups map[string]GroupConfig
+}
+
+type GroupConfig struct {
+    Name        string
+    RealmRoles  []string
+    ClientRoles map[string][]string
+    Members     []string
+}
+
+func setupOrganization(client *keycloaklib.KeycloakClient) error {
+    ctx := context.Background()
+    
+    structure := OrgStructure{
+        Groups: map[string]GroupConfig{
+            "engineering": {
+                Name:       "Engineering",
+                RealmRoles: []string{"developer"},
+                ClientRoles: map[string][]string{
+                    "api": {"read", "write"},
+                },
+                Members: []string{"dev1@example.com", "dev2@example.com"},
+            },
+            "management": {
+                Name:       "Management",
+                RealmRoles: []string{"manager", "developer"},
+                ClientRoles: map[string][]string{
+                    "api":     {"read", "write", "admin"},
+                    "reports": {"view-all"},
+                },
+                Members: []string{"manager@example.com"},
+            },
+        },
+    }
+    
+    for _, config := range structure.Groups {
+        // Create group with roles
+        groupID, err := client.CreateGroupWithRoles(
+            ctx,
+            config.Name,
+            config.RealmRoles,
+            config.ClientRoles,
+        )
+        if err != nil {
+            return fmt.Errorf("failed to create group %s: %w", config.Name, err)
+        }
+        
+        // Add members
+        for _, email := range config.Members {
+            userID, err := client.GetUserIDByUsername(ctx, email, true)
+            if err != nil {
+                log.Printf("Warning: User %s not found\n", email)
+                continue
+            }
+            
+            err = client.AddUserToGroup(ctx, userID, groupID)
+            if err != nil {
+                log.Printf("Warning: Failed to add %s to group\n", email)
+            }
+        }
+    }
+    
+    return nil
 }
 ```
 

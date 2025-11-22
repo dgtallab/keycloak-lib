@@ -549,6 +549,161 @@ func (ka *KeycloakClient) AddUserToGroup(ctx context.Context, userID, groupID st
 	return ka.doRequest(ctx, http.MethodPut, path, nil, nil)
 }
 
+func (ka *KeycloakClient) AddRealmRolesToGroup(ctx context.Context, groupID string, roleNames []string) error {
+	if groupID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+	if len(roleNames) == 0 {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	var roles []Role
+	for _, roleName := range roleNames {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		path := fmt.Sprintf("/admin/realms/%s/roles/%s", ka.config.Realm, url.PathEscape(roleName))
+		var role Role
+		err := ka.doRequest(ctx, http.MethodGet, path, nil, &role)
+		if err != nil {
+			return ka.errorf(ErrFailedToGetClientRoleWrapper, roleName, err)
+		}
+		roles = append(roles, role)
+	}
+
+	path := fmt.Sprintf("/admin/realms/%s/groups/%s/role-mappings/realm", ka.config.Realm, groupID)
+	return ka.doRequest(ctx, http.MethodPost, path, roles, nil)
+}
+
+func (ka *KeycloakClient) AddClientRolesToGroup(ctx context.Context, groupID, clientID string, roleNames []string) error {
+	if groupID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+	if clientID == emptyString {
+		return ka.errorf(ErrClientIDRequired)
+	}
+	if len(roleNames) == 0 {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	client, err := ka.getClientByClientID(ctx, clientID)
+	if err != nil {
+		return ka.errorf(ErrFailedToGetClientWrapper, err)
+	}
+	clientUUID := client.ID
+
+	var roles []Role
+	for _, roleName := range roleNames {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		role, err := ka.getClientRole(ctx, clientUUID, roleName)
+		if err != nil {
+			return ka.errorf(ErrFailedToGetClientRoleWrapper, roleName, err)
+		}
+		roles = append(roles, *role)
+	}
+
+	path := fmt.Sprintf("/admin/realms/%s/groups/%s/role-mappings/clients/%s", ka.config.Realm, groupID, clientUUID)
+	return ka.doRequest(ctx, http.MethodPost, path, roles, nil)
+}
+
+func (ka *KeycloakClient) CreateGroupWithRoles(ctx context.Context, groupName string, realmRoles []string, clientRoles map[string][]string) (string, error) {
+	if groupName == emptyString {
+		return emptyString, ka.errorf(ErrUsernameRequired)
+	}
+
+	group := &Group{
+		Name: groupName,
+	}
+
+	if err := ka.CreateGroup(ctx, group); err != nil {
+		return emptyString, err
+	}
+
+	createdGroup, err := ka.GetGroupByName(ctx, groupName)
+	if err != nil {
+		return emptyString, ka.errorf(ErrFailedToGetClientWrapper, err)
+	}
+
+	if len(realmRoles) > 0 {
+		if err := ka.AddRealmRolesToGroup(ctx, createdGroup.ID, realmRoles); err != nil {
+			_ = ka.DeleteGroup(ctx, createdGroup.ID)
+			return emptyString, ka.errorf(ErrFailedToAddRolesUserDeleted, err)
+		}
+	}
+
+	for clientID, roles := range clientRoles {
+		if err := ctx.Err(); err != nil {
+			_ = ka.DeleteGroup(ctx, createdGroup.ID)
+			return emptyString, err
+		}
+
+		if len(roles) > 0 {
+			if err := ka.AddClientRolesToGroup(ctx, createdGroup.ID, clientID, roles); err != nil {
+				_ = ka.DeleteGroup(ctx, createdGroup.ID)
+				return emptyString, ka.errorf(ErrFailedToAddRolesUserDeleted, err)
+			}
+		}
+	}
+
+	return createdGroup.ID, nil
+}
+
+func (ka *KeycloakClient) GetGroupByName(ctx context.Context, groupName string) (*Group, error) {
+	if groupName == emptyString {
+		return nil, ka.errorf(ErrUsernameRequired)
+	}
+
+	path := fmt.Sprintf("/admin/realms/%s/groups?search=%s", ka.config.Realm, url.QueryEscape(groupName))
+	var groups []Group
+	err := ka.doRequest(ctx, http.MethodGet, path, nil, &groups)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, group := range groups {
+		if group.Name == groupName {
+			return &group, nil
+		}
+	}
+
+	return nil, ka.errorf(ErrNoUserFound, groupName)
+}
+
+func (ka *KeycloakClient) DeleteGroup(ctx context.Context, groupID string) error {
+	if groupID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+	path := fmt.Sprintf("/admin/realms/%s/groups/%s", ka.config.Realm, groupID)
+	return ka.doRequest(ctx, http.MethodDelete, path, nil, nil)
+}
+
+func (ka *KeycloakClient) CreateGroupWithUsersAndRoles(ctx context.Context, groupName string, userIDs []string, realmRoles []string, clientRoles map[string][]string) (string, error) {
+	if groupName == emptyString {
+		return emptyString, ka.errorf(ErrUsernameRequired)
+	}
+
+	groupID, err := ka.CreateGroupWithRoles(ctx, groupName, realmRoles, clientRoles)
+	if err != nil {
+		return emptyString, err
+	}
+
+	for _, userID := range userIDs {
+		if err := ctx.Err(); err != nil {
+			return groupID, err
+		}
+
+		if err := ka.AddUserToGroup(ctx, userID, groupID); err != nil {
+			return groupID, ka.errorf(ErrFailedToAddRolesUserDeleted, err)
+		}
+	}
+
+	return groupID, nil
+}
+
 func (ka *KeycloakClient) CreateRole(ctx context.Context, role *Role) error {
 	path := fmt.Sprintf("/admin/realms/%s/roles", ka.config.Realm)
 	return ka.doRequest(ctx, http.MethodPost, path, role, nil)
