@@ -1477,3 +1477,370 @@ func (ka *KeycloakClient) CheckUserHasRoleInGroups(ctx context.Context, userID, 
 
 	return false, nil
 }
+
+func (ka *KeycloakClient) AddRealmRolesToUser(ctx context.Context, userID string, roleNames []string) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+
+	if len(roleNames) == 0 {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	var roles []Role
+	for _, roleName := range roleNames {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		path := fmt.Sprintf("/admin/realms/%s/roles/%s", ka.config.Realm, url.PathEscape(roleName))
+		var role Role
+		err := ka.doRequest(ctx, http.MethodGet, path, nil, &role)
+		if err != nil {
+			return ka.errorf(ErrFailedToGetClientRoleWrapper, roleName, err)
+		}
+
+		roles = append(roles, role)
+	}
+
+	path := fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/realm", ka.config.Realm, userID)
+	return ka.doRequest(ctx, http.MethodPost, path, roles, nil)
+}
+
+func (ka *KeycloakClient) RemoveRealmRolesFromUser(ctx context.Context, userID string, roleNames []string) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+
+	if len(roleNames) == 0 {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	var roles []Role
+	for _, roleName := range roleNames {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		path := fmt.Sprintf("/admin/realms/%s/roles/%s", ka.config.Realm, url.PathEscape(roleName))
+		var role Role
+		err := ka.doRequest(ctx, http.MethodGet, path, nil, &role)
+		if err != nil {
+			return ka.errorf(ErrFailedToGetClientRoleWrapper, roleName, err)
+		}
+
+		roles = append(roles, role)
+	}
+
+	path := fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/realm", ka.config.Realm, userID)
+	return ka.doRequest(ctx, http.MethodDelete, path, roles, nil)
+}
+
+func (ka *KeycloakClient) RemoveClientRolesFromUser(ctx context.Context, userID, clientID string, roleNames []string) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+
+	if clientID == emptyString {
+		return ka.errorf(ErrClientIDRequired)
+	}
+
+	if len(roleNames) == 0 {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	client, err := ka.getClientByClientID(ctx, clientID)
+	if err != nil {
+		return ka.errorf(ErrFailedToGetClientWrapper, err)
+	}
+
+	clientUUID := client.ID
+
+	var roles []Role
+	for _, roleName := range roleNames {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		role, err := ka.getClientRole(ctx, clientUUID, roleName)
+		if err != nil {
+			return ka.errorf(ErrFailedToGetClientRoleWrapper, roleName, err)
+		}
+
+		roles = append(roles, *role)
+	}
+
+	path := fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/clients/%s", ka.config.Realm, userID, clientUUID)
+	return ka.doRequest(ctx, http.MethodDelete, path, roles, nil)
+}
+
+func (ka *KeycloakClient) AddUserAttribute(ctx context.Context, userID, key string, values []string) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+
+	if key == emptyString {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	user, err := ka.GetUserByID(ctx, userID)
+	if err != nil {
+		return ka.errorf(ErrFailedToGetUserWrapper, err)
+	}
+
+	if user.Attributes == nil {
+		user.Attributes = make(map[string][]string)
+	}
+
+	user.Attributes[key] = values
+
+	params := UserUpdateParams{
+		Attributes: user.Attributes,
+	}
+
+	return ka.UpdateUserData(ctx, userID, params)
+}
+
+func (ka *KeycloakClient) RemoveUserAttribute(ctx context.Context, userID, key string) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+
+	if key == emptyString {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	user, err := ka.GetUserByID(ctx, userID)
+	if err != nil {
+		return ka.errorf(ErrFailedToGetUserWrapper, err)
+	}
+
+	if user.Attributes == nil {
+		return nil
+	}
+
+	delete(user.Attributes, key)
+
+	params := UserUpdateParams{
+		Attributes: user.Attributes,
+	}
+
+	return ka.UpdateUserData(ctx, userID, params)
+}
+
+func (ka *KeycloakClient) UpdateUserAttribute(ctx context.Context, userID, key string, valuesToAdd []string) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+
+	if key == emptyString {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	user, err := ka.GetUserByID(ctx, userID)
+	if err != nil {
+		return ka.errorf(ErrFailedToGetUserWrapper, err)
+	}
+
+	if user.Attributes == nil {
+		user.Attributes = make(map[string][]string)
+	}
+
+	currentValues := user.Attributes[key]
+
+	valueMap := make(map[string]bool)
+	for _, v := range currentValues {
+		valueMap[v] = true
+	}
+
+	for _, v := range valuesToAdd {
+		if !valueMap[v] {
+			currentValues = append(currentValues, v)
+			valueMap[v] = true
+		}
+	}
+
+	user.Attributes[key] = currentValues
+
+	params := UserUpdateParams{
+		Attributes: user.Attributes,
+	}
+
+	return ka.UpdateUserData(ctx, userID, params)
+}
+
+func (ka *KeycloakClient) RemoveUserAttributeValues(ctx context.Context, userID, key string, valuesToRemove []string) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+
+	if key == emptyString {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	user, err := ka.GetUserByID(ctx, userID)
+	if err != nil {
+		return ka.errorf(ErrFailedToGetUserWrapper, err)
+	}
+
+	if user.Attributes == nil || len(user.Attributes[key]) == 0 {
+		return nil
+	}
+
+	removeMap := make(map[string]bool)
+	for _, v := range valuesToRemove {
+		removeMap[v] = true
+	}
+
+	var newValues []string
+	for _, v := range user.Attributes[key] {
+		if !removeMap[v] {
+			newValues = append(newValues, v)
+		}
+	}
+
+	if len(newValues) > 0 {
+		user.Attributes[key] = newValues
+	} else {
+		delete(user.Attributes, key)
+	}
+
+	params := UserUpdateParams{
+		Attributes: user.Attributes,
+	}
+
+	return ka.UpdateUserData(ctx, userID, params)
+}
+
+func (ka *KeycloakClient) GetUserAttribute(ctx context.Context, userID, key string) ([]string, error) {
+	if userID == emptyString {
+		return nil, ka.errorf(ErrUserIDRequired)
+	}
+
+	if key == emptyString {
+		return nil, ka.errorf(ErrUsernameRequired)
+	}
+
+	user, err := ka.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, ka.errorf(ErrFailedToGetUserWrapper, err)
+	}
+
+	if user.Attributes == nil {
+		return []string{}, nil
+	}
+
+	return user.Attributes[key], nil
+}
+
+func (ka *KeycloakClient) RemoveRealmRolesFromGroup(ctx context.Context, groupID string, roleNames []string) error {
+	if groupID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+
+	if len(roleNames) == 0 {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	var roles []Role
+	for _, roleName := range roleNames {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		path := fmt.Sprintf("/admin/realms/%s/roles/%s", ka.config.Realm, url.PathEscape(roleName))
+		var role Role
+		err := ka.doRequest(ctx, http.MethodGet, path, nil, &role)
+		if err != nil {
+			return ka.errorf(ErrFailedToGetClientRoleWrapper, roleName, err)
+		}
+
+		roles = append(roles, role)
+	}
+
+	path := fmt.Sprintf("/admin/realms/%s/groups/%s/role-mappings/realm", ka.config.Realm, groupID)
+	return ka.doRequest(ctx, http.MethodDelete, path, roles, nil)
+}
+
+func (ka *KeycloakClient) RemoveClientRolesFromGroup(ctx context.Context, groupID, clientID string, roleNames []string) error {
+	if groupID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+
+	if clientID == emptyString {
+		return ka.errorf(ErrClientIDRequired)
+	}
+
+	if len(roleNames) == 0 {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	client, err := ka.getClientByClientID(ctx, clientID)
+	if err != nil {
+		return ka.errorf(ErrFailedToGetClientWrapper, err)
+	}
+
+	clientUUID := client.ID
+
+	var roles []Role
+	for _, roleName := range roleNames {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		role, err := ka.getClientRole(ctx, clientUUID, roleName)
+		if err != nil {
+			return ka.errorf(ErrFailedToGetClientRoleWrapper, roleName, err)
+		}
+
+		roles = append(roles, *role)
+	}
+
+	path := fmt.Sprintf("/admin/realms/%s/groups/%s/role-mappings/clients/%s", ka.config.Realm, groupID, clientUUID)
+	return ka.doRequest(ctx, http.MethodDelete, path, roles, nil)
+}
+
+func (ka *KeycloakClient) CreateUserWithAttributes(ctx context.Context, params UserCreateParams, realmRoles []string, clientID string, clientRoles []string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return emptyString, err
+	}
+
+	userID, err := ka.CreateUser(ctx, params)
+	if err != nil {
+		return emptyString, err
+	}
+
+	if len(realmRoles) > 0 {
+		if err := ctx.Err(); err != nil {
+			_ = ka.DeleteUser(context.Background(), userID)
+			return emptyString, err
+		}
+
+		err = ka.AddRealmRolesToUser(ctx, userID, realmRoles)
+		if err != nil {
+			delErr := ka.DeleteUser(ctx, userID)
+			if delErr != nil {
+				return emptyString, ka.errorf(ErrFailedToAddRolesRollbackFailed, err, delErr)
+			}
+			return emptyString, ka.errorf(ErrFailedToAddRolesUserDeleted, err)
+		}
+	}
+
+	if clientID != emptyString && len(clientRoles) > 0 {
+		if err := ctx.Err(); err != nil {
+			_ = ka.DeleteUser(context.Background(), userID)
+			return emptyString, err
+		}
+
+		err = ka.AddClientRolesToUser(ctx, userID, clientID, clientRoles)
+		if err != nil {
+			delErr := ka.DeleteUser(ctx, userID)
+			if delErr != nil {
+				return emptyString, ka.errorf(ErrFailedToAddRolesRollbackFailed, err, delErr)
+			}
+			return emptyString, ka.errorf(ErrFailedToAddRolesUserDeleted, err)
+		}
+	}
+
+	return userID, nil
+}
