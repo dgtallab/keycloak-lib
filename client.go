@@ -328,6 +328,30 @@ func (ka *KeycloakClient) ExecuteActionsEmail(ctx context.Context, userID string
 	return ka.doRequest(ctx, http.MethodPut, path, actions, nil)
 }
 
+func (ka *KeycloakClient) SendEmail(ctx context.Context, userID string, actions []string) error {
+	if userID == emptyString {
+		return ka.errorf(ErrUserIDRequired)
+	}
+
+	if actions == nil || len(actions) == 0 {
+		path := fmt.Sprintf("/admin/realms/%s/users/%s/send-verification-email", ka.config.Realm, userID)
+
+		err := ka.doRequest(ctx, http.MethodPut, path, nil, nil)
+		if err == nil {
+			return nil
+		}
+
+		return ka.sendExecuteActionsEmail(ctx, userID, []string{})
+	}
+
+	return ka.sendExecuteActionsEmail(ctx, userID, actions)
+}
+
+func (ka *KeycloakClient) sendExecuteActionsEmail(ctx context.Context, userID string, actions []string) error {
+	path := fmt.Sprintf("/admin/realms/%s/users/%s/execute-actions-email", ka.config.Realm, userID)
+	return ka.doRequest(ctx, http.MethodPut, path, actions, nil)
+}
+
 func (ka *KeycloakClient) GetUserByID(ctx context.Context, userID string) (*User, error) {
 	path := fmt.Sprintf("/admin/realms/%s/users/%s", ka.config.Realm, userID)
 	var user User
