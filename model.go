@@ -19,6 +19,19 @@ type KeycloakClient struct {
 	clientCache  sync.Map
 }
 
+type TokenRequestParams struct {
+	GrantType    string
+	ClientID     string
+	ClientSecret string
+	Username     string
+	Password     string
+	RefreshToken string
+	Code         string
+	RedirectURI  string
+	DeviceCode   string
+	Scopes       []string
+}
+
 type UserCreateParams struct {
 	Username        string
 	Email           string
@@ -176,4 +189,99 @@ type MagicLinkResponse struct {
 	UserID string `json:"user_id"`
 	Link   string `json:"link"`
 	Sent   bool   `json:"sent"`
+}
+
+type UserSearchParams struct {
+	Search              string            // busca geral por username, email, firstName, lastName
+	Email               string            // filtro por email exato
+	Username            string            // filtro por username exato
+	FirstName           string            // filtro por firstName
+	LastName            string            // filtro por lastName
+	Enabled             *bool             // filtro por status habilitado/desabilitado
+	EmailVerified       *bool             // filtro por email verificado
+	Attributes          map[string]string // filtro por atributos customizados
+	First               int               // índice do primeiro resultado (paginação)
+	Max                 int               // número máximo de resultados
+	Exact               bool              // busca exata (default: false)
+	BriefRepresentation bool              // representação resumida (default: false)
+}
+
+type UserSearchParamsBuilder struct {
+	params UserSearchParams
+}
+
+func NewUserSearchParamsBuilder() *UserSearchParamsBuilder {
+	return &UserSearchParamsBuilder{
+		params: UserSearchParams{
+			Attributes: make(map[string]string),
+		},
+	}
+}
+
+func (b *UserSearchParamsBuilder) WithSearch(search string) *UserSearchParamsBuilder {
+	b.params.Search = search
+	return b
+}
+
+func (b *UserSearchParamsBuilder) WithEmail(email string) *UserSearchParamsBuilder {
+	b.params.Email = email
+	return b
+}
+
+func (b *UserSearchParamsBuilder) WithUsername(username string) *UserSearchParamsBuilder {
+	b.params.Username = username
+	return b
+}
+
+func (b *UserSearchParamsBuilder) WithFirstName(firstName string) *UserSearchParamsBuilder {
+	b.params.FirstName = firstName
+	return b
+}
+
+func (b *UserSearchParamsBuilder) WithLastName(lastName string) *UserSearchParamsBuilder {
+	b.params.LastName = lastName
+	return b
+}
+
+func (b *UserSearchParamsBuilder) WithEnabled(enabled bool) *UserSearchParamsBuilder {
+	b.params.Enabled = &enabled
+	return b
+}
+
+func (b *UserSearchParamsBuilder) WithEmailVerified(verified bool) *UserSearchParamsBuilder {
+	b.params.EmailVerified = &verified
+	return b
+}
+
+func (b *UserSearchParamsBuilder) WithAttribute(key, value string) *UserSearchParamsBuilder {
+	if b.params.Attributes == nil {
+		b.params.Attributes = make(map[string]string)
+	}
+	b.params.Attributes[key] = value
+	return b
+}
+
+func (b *UserSearchParamsBuilder) WithAttributes(attributes map[string]string) *UserSearchParamsBuilder {
+	b.params.Attributes = attributes
+	return b
+}
+
+func (b *UserSearchParamsBuilder) WithPagination(first, max int) *UserSearchParamsBuilder {
+	b.params.First = first
+	b.params.Max = max
+	return b
+}
+
+func (b *UserSearchParamsBuilder) WithExactMatch(exact bool) *UserSearchParamsBuilder {
+	b.params.Exact = exact
+	return b
+}
+
+func (b *UserSearchParamsBuilder) WithBriefRepresentation(brief bool) *UserSearchParamsBuilder {
+	b.params.BriefRepresentation = brief
+	return b
+}
+
+func (b *UserSearchParamsBuilder) Build() UserSearchParams {
+	return b.params
 }

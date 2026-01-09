@@ -16,6 +16,7 @@ This library is suitable for backend services, APIs, or CLI tools requiring Keyc
   - [Initializing the Library](#initializing-the-library)
   - [Token Verification & Middleware](#token-verification--middleware)
   - [Admin Operations](#admin-operations)
+    - [User Filtering by Custom Attributes](#filter-users-by-custom-attributes)
   - [Group Management](#group-management)
   - [Advanced Authentication](#advanced-authentication)
 - [Full Example: Web App Integration](#full-example-web-app-integration)
@@ -27,7 +28,7 @@ This library is suitable for backend services, APIs, or CLI tools requiring Keyc
 - [Acknowledgments](#acknowledgments)
 
 ## Features
-- **Admin API Support**: User create/get/update/delete with attributes, passwords, verification, and required actions; add client-specific roles to users; trigger password reset emails; get user ID by username; comprehensive group management with role assignments; role/client management; session handling and logout.
+- **Admin API Support**: User create/get/update/delete with attributes, passwords, verification, and required actions; **advanced user filtering by custom attributes** (tenant_id, department, etc.); add client-specific roles to users; trigger password reset emails; get user ID by username; comprehensive group management with role assignments; role/client management; session handling and logout.
 - **Token Management**: Client credentials grant, caching with lazy refresh, expiration checks, and thread-safety using RWMutex to minimize API calls.
 - **Token Verification**: OIDC-compliant JWT verification with automatic public key fetching; extract user claims, roles, groups, and custom attributes from tokens.
 - **HTTP Middleware**: Ready-to-use middleware for protecting HTTP endpoints with authentication; support for role-based access control; compatible with standard `http.Handler`, Gorilla Mux, Chi, and other popular routers.
@@ -38,7 +39,8 @@ This library is suitable for backend services, APIs, or CLI tools requiring Keyc
 - **Error Handling**: Custom errors with internationalized messages (en/pt), avoiding sensitive info leaks.
 - **Performance Optimizations**: Reused HTTP client with connection pooling and timeouts; context support for cancellations.
 - **Security Enhancements**: Enforced HTTPS (with optional override for testing); input validation to prevent injections.
-- **Builder Pattern**: Fluent builders for configuration and user creation parameters for improved readability and flexibility.
+- **Builder Pattern**: Fluent builders for configuration, user creation, and advanced search parameters for improved readability and flexibility.
+- **Multi-tenancy Support**: Built-in support for filtering users by custom attributes like tenant_id, organization, department, and more with pagination.
 
 ## Installation
 Add to your `go.mod`:
@@ -343,6 +345,209 @@ if err != nil {
     // Handle error
 }
 ```
+
+#### Filter Users by Custom Attributes
+The library provides powerful filtering capabilities for users based on custom attributes like `tenant_id`, `organization`, `department`, etc.
+
+##### Filter by Single Attribute
+```go
+// Filter users by tenant_id
+tenantID := "550e8400-e29b-41d4-a716-446655440000"
+users, err := admin.GetUsersByAttribute(ctx, "tenant_id", tenantID)
+if err != nil {
+    // Handle error
+}
+
+fmt.Printf("Found %d users in tenant %s\n", len(users), tenantID)
+for _, user := range users {
+    // Access custom attributes
+    if tenantIDs, ok := user.Attributes["tenant_id"]; ok && len(tenantIDs) > 0 {
+        fmt.Printf("User: %s, Tenant: %s\n", user.Username, tenantIDs[0])
+    }
+}
+```
+
+##### Filter by Multiple Attributes
+```go
+// Filter users by multiple attributes
+attributes := map[string]string{
+    "tenant_id":  "550e8400-e29b-41d4-a716-446655440000",
+    "department": "engineering",
+    "status":     "active",
+}
+
+users, err := admin.GetUsersByAttributes(ctx, attributes)
+if err != nil {
+    // Handle error
+}
+```
+
+##### Advanced Search with Builder Pattern
+Use `UserSearchParamsBuilder` for more complex queries with standard fields, custom attributes, and pagination:
+
+```go
+// Build search parameters using the fluent builder
+params := keycloaklib.NewUserSearchParamsBuilder().
+    WithAttribute("tenant_id", "550e8400-e29b-41d4-a716-446655440000").
+    WithAttribute("organization", "acme-corp").
+    WithEnabled(true).
+    WithEmailVerified(true).
+    WithPagination(0, 50). // first 50 results
+    WithExactMatch(false).
+    Build()
+
+users, err := admin.GetUsersWithParams(ctx, params)
+if err != nil {
+    // Handle error
+}
+
+fmt.Printf("Found %d active users\n", len(users))
+```
+
+##### Search by Email with Tenant Filter
+```go
+params := keycloaklib.NewUserSearchParamsBuilder().
+    WithEmail("user@example.com").
+    WithAttribute("tenant_id", "550e8400-e29b-41d4-a716-446655440000").
+    WithExactMatch(true).
+    Build()
+
+users, err := admin.GetUsersWithParams(ctx, params)
+if err != nil {
+    // Handle error
+}
+
+if len(users) > 0 {
+    user := users[0]
+    fmt.Printf("User found: %s (%s)\n", user.Username, user.Email)
+}
+```
+
+##### Paginated Search Example
+```go
+// Iterate through all users in a tenant with pagination
+tenantID := "550e8400-e29b-41d4-a716-446655440000"
+pageSize := 50
+page := 0
+
+for {
+    params := keycloaklib.NewUserSearchParamsBuilder().
+        WithAttribute("tenant_id", tenantID).
+        WithPagination(page*pageSize, pageSize).
+        Build()
+    
+    users, err := admin.GetUsersWithParams(ctx, params)
+    if err != nil {
+        // Handle error
+        break
+    }
+    
+    if len(users) == 0 {
+        break // No more results
+    }
+    
+    fmt.Printf("Page %d: %d users\n", page+1, len(users))
+    
+    // Process users
+    for _, user := range users {
+        fmt.Printf("  - %s (%s)\n", user.Username, user.Email)
+    }
+    
+    page++
+    
+    if len(users) < pageSize {
+        break // Last page
+    }
+}
+```
+
+##### Available Search Parameters
+The `UserSearchParams` struct supports:
+- **Search**: General search by username, email, firstName, lastName
+- **Email**: Filter by exact email
+- **Username**: Filter by exact username
+- **FirstName**: Filter by first name
+- **LastName**: Filter by last name
+- **Enabled**: Filter by enabled status (true/false)
+- **EmailVerified**: Filter by email verification status
+- **Attributes**: Filter by custom attributes (map[string]string)
+- **First**: Pagination - starting index
+- **Max**: Pagination - maximum results
+- **Exact**: Exact match for text fields
+- **BriefRepresentation**: Return minimal user data (better performance)
+
+##### Builder Methods
+```go
+builder := keycloaklib.NewUserSearchParamsBuilder()
+
+// Standard fields
+builder.WithSearch("john")
+builder.WithEmail("john@example.com")
+builder.WithUsername("john.doe")
+builder.WithFirstName("John")
+builder.WithLastName("Doe")
+
+// Status filters
+builder.WithEnabled(true)
+builder.WithEmailVerified(true)
+
+// Custom attributes
+builder.WithAttribute("tenant_id", "uuid-here")
+builder.WithAttribute("department", "engineering")
+// or multiple at once
+builder.WithAttributes(map[string]string{
+    "tenant_id": "uuid-here",
+    "role": "admin",
+})
+
+// Pagination and options
+builder.WithPagination(0, 100) // first: start index, max: count
+builder.WithExactMatch(true)
+builder.WithBriefRepresentation(true)
+
+// Build the params
+params := builder.Build()
+```
+
+##### Common Use Cases
+
+**Multi-tenancy: List users by tenant**
+```go
+users, _ := admin.GetUsersByAttribute(ctx, "tenant_id", tenantUUID)
+```
+
+**Department-based filtering**
+```go
+users, _ := admin.GetUsersByAttribute(ctx, "department", "engineering")
+```
+
+**Premium subscribers only**
+```go
+users, _ := admin.GetUsersByAttribute(ctx, "subscription_plan", "premium")
+```
+
+**Complex filter: Active users in specific tenant and department**
+```go
+enabled := true
+params := keycloaklib.UserSearchParams{
+    Attributes: map[string]string{
+        "tenant_id":  "uuid",
+        "department": "sales",
+    },
+    Enabled: &enabled,
+}
+users, _ := admin.GetUsersWithParams(ctx, params)
+```
+
+**Note**: Custom attributes in Keycloak are stored as string arrays. Access them safely:
+```go
+if values, ok := user.Attributes["tenant_id"]; ok && len(values) > 0 {
+    tenantID := values[0]
+    // use tenantID
+}
+```
+
+For more examples and detailed documentation, see [FILTRO_USUARIOS.md](FILTRO_USUARIOS.md) and [EXAMPLES.md](EXAMPLES.md).
 
 #### Get User ID by Username
 ```go
