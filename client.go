@@ -904,22 +904,31 @@ func (ka *KeycloakClient) GetClientRoles(ctx context.Context, clientID string) (
 	return roles, err
 }
 
-func (ka *KeycloakClient) CreateClientRole(ctx context.Context, clientID string, role *Role) error {
+func (ka *KeycloakClient) CreateClientRole(ctx context.Context, clientID string, role *Role) (string, error) {
 	if clientID == emptyString {
-		return ka.errorf(ErrClientIDRequired)
+		return emptyString, ka.errorf(ErrClientIDRequired)
 	}
 	if role == nil || role.Name == emptyString {
-		return ka.errorf(ErrUsernameRequired)
+		return emptyString, ka.errorf(ErrUsernameRequired)
 	}
 
 	client, err := ka.getClientByClientID(ctx, clientID)
 	if err != nil {
-		return ka.errorf(ErrFailedToGetClientWrapper, err)
+		return emptyString, ka.errorf(ErrFailedToGetClientWrapper, err)
 	}
 	clientUUID := client.ID
 
 	path := fmt.Sprintf("/admin/realms/%s/clients/%s/roles", ka.config.Realm, clientUUID)
-	return ka.doRequest(ctx, http.MethodPost, path, role, nil)
+	var createdRole Role
+	if err := ka.doRequest(ctx, http.MethodPost, path, role, &createdRole); err != nil {
+		return emptyString, err
+	}
+
+	if createdRole.ID == emptyString {
+		return emptyString, ka.errorf(ErrRequestFailed, "role created but no ID returned")
+	}
+
+	return createdRole.ID, nil
 }
 
 func (ka *KeycloakClient) GetClients(ctx context.Context) ([]Client, error) {
