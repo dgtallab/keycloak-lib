@@ -919,16 +919,20 @@ func (ka *KeycloakClient) CreateClientRole(ctx context.Context, clientID string,
 	clientUUID := client.ID
 
 	path := fmt.Sprintf("/admin/realms/%s/clients/%s/roles", ka.config.Realm, clientUUID)
-	var createdRole Role
-	if err := ka.doRequest(ctx, http.MethodPost, path, role, &createdRole); err != nil {
+	if err := ka.doRequest(ctx, http.MethodPost, path, role, nil); err != nil {
 		return emptyString, err
 	}
 
-	if createdRole.ID == emptyString {
-		return emptyString, ka.errorf(ErrRequestFailed, "role created but no ID returned")
+	roles, err := ka.GetClientRoles(ctx, clientID)
+	if err != nil {
+		return emptyString, err
 	}
-
-	return createdRole.ID, nil
+	for _, r := range roles {
+		if r.Name == role.Name {
+			return r.ID, nil
+		}
+	}
+	return emptyString, ka.errorf(ErrRequestFailed, "role criada mas ID não encontrado")
 }
 
 func (ka *KeycloakClient) GetClients(ctx context.Context) ([]Client, error) {
