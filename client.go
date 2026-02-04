@@ -935,6 +935,22 @@ func (ka *KeycloakClient) CreateClientRole(ctx context.Context, clientID string,
 	return emptyString, ka.errorf(ErrRequestFailed, "role criada mas ID não encontrado")
 }
 
+func (ka *KeycloakClient) UpdateClientRole(ctx context.Context, clientID, roleName string, role *Role) error {
+	if clientID == emptyString {
+		return ka.errorf(ErrClientIDRequired)
+	}
+	if roleName == emptyString || role == nil {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	client, err := ka.getClientByClientID(ctx, clientID)
+	if err != nil {
+		return ka.errorf(ErrFailedToGetClientWrapper, err)
+	}
+	path := fmt.Sprintf("/admin/realms/%s/clients/%s/roles/%s", ka.config.Realm, client.ID, url.PathEscape(roleName))
+	return ka.doRequest(ctx, http.MethodPut, path, role, nil)
+}
+
 func (ka *KeycloakClient) GetClients(ctx context.Context) ([]Client, error) {
 	path := fmt.Sprintf("/admin/realms/%s/clients", ka.config.Realm)
 	var clients []Client
@@ -1929,4 +1945,52 @@ func (ka *KeycloakClient) CreateUserWithAttributes(ctx context.Context, params U
 	}
 
 	return userID, nil
+}
+
+func (ka *KeycloakClient) GetUsersByRoleID(ctx context.Context, clientID, roleID string) ([]User, error) {
+	if clientID == emptyString {
+		return nil, ka.errorf(ErrClientIDRequired)
+	}
+	if roleID == emptyString {
+		return nil, ka.errorf(ErrUsernameRequired)
+	}
+
+	client, err := ka.getClientByClientID(ctx, clientID)
+	if err != nil {
+		return nil, ka.errorf(ErrFailedToGetClientWrapper, err)
+	}
+	clientUUID := client.ID
+
+	path := fmt.Sprintf("/admin/realms/%s/clients/%s/roles-by-id/%s/users", ka.config.Realm, clientUUID, roleID)
+	var users []User
+	err = ka.doRequest(ctx, http.MethodGet, path, nil, &users)
+	return users, err
+}
+
+func (ka *KeycloakClient) GetRoleByID(ctx context.Context, roleID string) (*Role, error) {
+	if roleID == emptyString {
+		return nil, ka.errorf(ErrUsernameRequired)
+	}
+
+	path := fmt.Sprintf("/admin/realms/%s/roles-by-id/%s", ka.config.Realm, roleID)
+	var role Role
+	err := ka.doRequest(ctx, http.MethodGet, path, nil, &role)
+	return &role, err
+}
+
+func (ka *KeycloakClient) DeleteClientRole(ctx context.Context, clientID, roleName string) error {
+	if clientID == emptyString {
+		return ka.errorf(ErrClientIDRequired)
+	}
+	if roleName == emptyString {
+		return ka.errorf(ErrUsernameRequired)
+	}
+
+	client, err := ka.getClientByClientID(ctx, clientID)
+	if err != nil {
+		return ka.errorf(ErrFailedToGetClientWrapper, err)
+	}
+
+	path := fmt.Sprintf("/admin/realms/%s/clients/%s/roles/%s", ka.config.Realm, client.ID, url.PathEscape(roleName))
+	return ka.doRequest(ctx, http.MethodDelete, path, nil, nil)
 }
