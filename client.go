@@ -1961,7 +1961,8 @@ func (ka *KeycloakClient) GetUsersByRoleID(ctx context.Context, clientID, roleID
 	}
 	clientUUID := client.ID
 
-	path := fmt.Sprintf("/admin/realms/%s/clients/%s/roles-by-id/%s/users", ka.config.Realm, clientUUID, roleID)
+	path := fmt.Sprintf("/admin/realms/%s/clients/%s/roles/%s/users", ka.config.Realm, clientUUID, roleID)
+
 	var users []User
 	err = ka.doRequest(ctx, http.MethodGet, path, nil, &users)
 	return users, err
