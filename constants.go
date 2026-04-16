@@ -86,4 +86,8 @@ const (
 	ErrFailedToGetUserWrapper                   = "ErrFailedToGetUserWrapper"
 	ErrCurrentPasswordIncorrect                 = "ErrCurrentPasswordIncorrect"
 	ErrFailedToValidateCurrentPassword          = "ErrFailedToValidateCurrentPassword"
+	ErrSocialProviderRequired                   = "ErrSocialProviderRequired"
+	ErrStateRequired                            = "ErrStateRequired"
+	ErrFailedToGeneratePKCE                     = "ErrFailedToGeneratePKCE"
+	ErrFailedToGenerateState                    = "ErrFailedToGenerateState"
 )

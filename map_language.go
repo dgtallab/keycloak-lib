@@ -79,6 +79,10 @@ var translations = map[string]map[string]string{
 		ErrFailedToGetUserWrapper:                   "failed to get user: %w",
 		ErrCurrentPasswordIncorrect:                 "current password is incorrect",
 		ErrFailedToValidateCurrentPassword:          "failed to validate current password: %w",
+		ErrSocialProviderRequired:                   "social identity provider alias is required (e.g. \"microsoft\", \"google\")",
+		ErrStateRequired:                            "state parameter is required for CSRF protection",
+		ErrFailedToGeneratePKCE:                     "failed to generate PKCE parameters: %w",
+		ErrFailedToGenerateState:                    "failed to generate state parameter: %w",
 	},
 	"pt": {
 		ErrInvalidKeycloakURL:                       "URL do Keycloak inválida",
@@ -156,5 +160,9 @@ var translations = map[string]map[string]string{
 		ErrFailedToGetUserWrapper:                   "falha ao obter o usuário: %w",
 		ErrCurrentPasswordIncorrect:                 "senha atual está incorreta",
 		ErrFailedToValidateCurrentPassword:          "falha ao validar a senha atual: %w",
+		ErrSocialProviderRequired:                   "o alias do provedor de identidade social é obrigatório (ex: \"microsoft\", \"google\")",
+		ErrStateRequired:                            "o parâmetro state é obrigatório para proteção contra CSRF",
+		ErrFailedToGeneratePKCE:                     "falha ao gerar os parâmetros PKCE: %w",
+		ErrFailedToGenerateState:                    "falha ao gerar o parâmetro state: %w",
 	},
 }

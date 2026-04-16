@@ -30,6 +30,7 @@ type TokenRequestParams struct {
 	RedirectURI  string
 	DeviceCode   string
 	Scopes       []string
+	CodeVerifier string
 }
 
 type UserCreateParams struct {
